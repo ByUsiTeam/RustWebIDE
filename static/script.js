@@ -2,12 +2,15 @@ let currentTerminalId = null;
 let socket = null;
 let isAuthenticated = false;
 let currentUser = null;
+let currentFile = null;
+let fileTreeData = null;
 
 // 初始化
 document.addEventListener('DOMContentLoaded', function() {
     checkAuthStatus();
     loadSavedCode();
     initSocketIO();
+    initFileExplorer();
 });
 
 // 检查认证状态
@@ -21,6 +24,8 @@ async function checkAuthStatus() {
             currentUser = result.user;
             updateUserInfo(currentUser);
             showMessage('自动登录成功!', 'success');
+            // 加载文件树
+            loadFileTree();
         }
     } catch (error) {
         console.log('检查认证状态失败:', error);
@@ -54,6 +59,23 @@ function initSocketIO() {
     });
 }
 
+// 文件浏览器初始化
+function initFileExplorer() {
+    // 文件浏览器事件监听
+    document.getElementById('file-tree').addEventListener('click', handleFileTreeClick);
+    document.getElementById('file-tree').addEventListener('contextmenu', handleFileTreeContextMenu);
+    
+    // 右键菜单事件
+    document.addEventListener('click', function() {
+        hideContextMenu();
+    });
+    
+    // 新建文件/文件夹对话框事件
+    document.getElementById('create-file-confirm').addEventListener('click', createNewFile);
+    document.getElementById('create-folder-confirm').addEventListener('click', createNewFolder);
+    document.getElementById('rename-confirm').addEventListener('click', renameItem);
+}
+
 // 显示/隐藏模态框
 function showLogin() {
     document.getElementById('loginModal').style.display = 'flex';
@@ -66,6 +88,9 @@ function showRegister() {
 function hideModals() {
     document.getElementById('loginModal').style.display = 'none';
     document.getElementById('registerModal').style.display = 'none';
+    document.getElementById('create-file-modal').style.display = 'none';
+    document.getElementById('create-folder-modal').style.display = 'none';
+    document.getElementById('rename-modal').style.display = 'none';
 }
 
 // 标签切换
@@ -128,6 +153,9 @@ async function login() {
                 socket.disconnect();
             }
             initSocketIO();
+            
+            // 加载文件树
+            loadFileTree();
         } else {
             showMessage('登录失败: ' + result.message, 'error');
         }
@@ -174,8 +202,12 @@ function logout() {
     isAuthenticated = false;
     currentUser = null;
     currentTerminalId = null;
+    currentFile = null;
     document.getElementById('userInfo').style.display = 'none';
     document.getElementById('authButtons').style.display = 'flex';
+    
+    // 清空文件树
+    document.getElementById('file-tree').innerHTML = '';
     
     if (socket) {
         socket.disconnect();
@@ -190,6 +222,401 @@ function updateUserInfo(userData) {
     document.getElementById('authButtons').style.display = 'none';
 }
 
+// 文件树操作
+async function loadFileTree() {
+    if (!isAuthenticated) return;
+    
+    try {
+        const response = await fetch('/api/files/tree?path=/home/user');
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            fileTreeData = result.tree;
+            renderFileTree(fileTreeData);
+        } else {
+            console.error('加载文件树失败:', result.message);
+        }
+    } catch (error) {
+        console.error('加载文件树错误:', error);
+    }
+}
+
+function renderFileTree(tree, container = null, level = 0) {
+    const fileTree = container || document.getElementById('file-tree');
+    
+    if (!container) {
+        fileTree.innerHTML = '';
+    }
+    
+    if (!tree || !tree.children) return;
+    
+    tree.children.forEach(item => {
+        const itemElement = document.createElement('div');
+        itemElement.className = 'file-tree-item';
+        itemElement.dataset.path = item.path;
+        itemElement.dataset.type = item.type;
+        
+        const indent = ' '.repeat(level * 4);
+        const icon = item.type === 'directory' ? 
+            (item.expanded ? '📂' : '📁') : 
+            getFileIcon(item.extension);
+        
+        itemElement.innerHTML = `
+            <div class="file-item-content" style="padding-left: ${level * 15}px">
+                <span class="file-icon">${icon}</span>
+                <span class="file-name">${item.name}</span>
+            </div>
+        `;
+        
+        fileTree.appendChild(itemElement);
+        
+        // 如果是目录且有子项，递归渲染
+        if (item.type === 'directory' && item.children && item.children.length > 0) {
+            if (item.expanded) {
+                renderFileTree(item, fileTree, level + 1);
+            }
+        }
+    });
+}
+
+function getFileIcon(extension) {
+    const iconMap = {
+        '.rs': '🦀',
+        '.toml': '⚙️',
+        '.txt': '📄',
+        '.md': '📝',
+        '.json': '🔧',
+        '.py': '🐍',
+        '.js': '📜',
+        '.html': '🌐',
+        '.css': '🎨',
+        '.sh': '💻',
+        '.lock': '🔒'
+    };
+    
+    return iconMap[extension] || '📄';
+}
+
+function handleFileTreeClick(event) {
+    const itemContent = event.target.closest('.file-item-content');
+    if (!itemContent) return;
+    
+    const item = itemContent.parentElement;
+    const path = item.dataset.path;
+    const type = item.dataset.type;
+    
+    if (type === 'directory') {
+        // 切换目录展开状态
+        toggleDirectory(item, path);
+    } else {
+        // 打开文件
+        openFile(path);
+    }
+}
+
+function toggleDirectory(item, path) {
+    // 简单的展开/收起实现
+    const wasExpanded = item.classList.contains('expanded');
+    
+    if (wasExpanded) {
+        item.classList.remove('expanded');
+        // 隐藏子项（简化实现）
+        const children = item.parentElement.querySelectorAll(`.file-tree-item[data-path^="${path}/"]`);
+        children.forEach(child => {
+            if (child !== item) {
+                child.style.display = 'none';
+            }
+        });
+    } else {
+        item.classList.add('expanded');
+        // 显示子项（简化实现）
+        const children = item.parentElement.querySelectorAll(`.file-tree-item[data-path^="${path}/"]`);
+        children.forEach(child => {
+            if (child !== item) {
+                child.style.display = 'block';
+            }
+        });
+    }
+}
+
+async function openFile(filePath) {
+    try {
+        const response = await fetch(`/api/files/read?path=${encodeURIComponent(filePath)}`);
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            document.getElementById('editor').value = result.content;
+            currentFile = filePath;
+            updateEditorTitle(filePath);
+            showMessage(`已打开文件: ${filePath}`, 'success');
+        } else {
+            showMessage('打开文件失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        showMessage('打开文件错误: ' + error.message, 'error');
+    }
+}
+
+function updateEditorTitle(filePath) {
+    const title = document.querySelector('.code-editor h3');
+    if (title && filePath) {
+        const fileName = filePath.split('/').pop();
+        title.textContent = `代码编辑器 - ${fileName}`;
+    }
+}
+
+// 右键菜单功能
+let contextMenuTarget = null;
+
+function handleFileTreeContextMenu(event) {
+    const item = event.target.closest('.file-tree-item');
+    if (!item) return;
+    
+    event.preventDefault();
+    contextMenuTarget = item;
+    
+    const contextMenu = document.getElementById('context-menu');
+    contextMenu.style.display = 'block';
+    contextMenu.style.left = event.pageX + 'px';
+    contextMenu.style.top = event.pageY + 'px';
+    
+    // 根据类型显示不同的菜单项
+    const type = item.dataset.type;
+    const newFileItem = document.querySelector('[data-action="new-file"]');
+    const newFolderItem = document.querySelector('[data-action="new-folder"]');
+    const renameItem = document.querySelector('[data-action="rename"]');
+    const deleteItem = document.querySelector('[data-action="delete"]');
+    
+    if (type === 'directory') {
+        newFileItem.style.display = 'block';
+        newFolderItem.style.display = 'block';
+    } else {
+        newFileItem.style.display = 'none';
+        newFolderItem.style.display = 'none';
+    }
+    
+    renameItem.style.display = 'block';
+    deleteItem.style.display = 'block';
+}
+
+function hideContextMenu() {
+    document.getElementById('context-menu').style.display = 'none';
+    contextMenuTarget = null;
+}
+
+// 上下文菜单操作
+document.addEventListener('DOMContentLoaded', function() {
+    const contextMenu = document.getElementById('context-menu');
+    
+    contextMenu.addEventListener('click', function(event) {
+        const action = event.target.dataset.action;
+        if (!action) return;
+        
+        switch (action) {
+            case 'new-file':
+                showCreateFileModal();
+                break;
+            case 'new-folder':
+                showCreateFolderModal();
+                break;
+            case 'rename':
+                showRenameModal();
+                break;
+            case 'delete':
+                deleteItem();
+                break;
+        }
+        
+        hideContextMenu();
+    });
+});
+
+function showCreateFileModal() {
+    if (!contextMenuTarget) return;
+    
+    const basePath = contextMenuTarget.dataset.path;
+    document.getElementById('new-file-path').value = basePath + '/';
+    document.getElementById('new-file-name').value = '';
+    document.getElementById('create-file-modal').style.display = 'flex';
+}
+
+function showCreateFolderModal() {
+    if (!contextMenuTarget) return;
+    
+    const basePath = contextMenuTarget.dataset.path;
+    document.getElementById('new-folder-path').value = basePath + '/';
+    document.getElementById('new-folder-name').value = '';
+    document.getElementById('create-folder-modal').style.display = 'flex';
+}
+
+function showRenameModal() {
+    if (!contextMenuTarget) return;
+    
+    const oldPath = contextMenuTarget.dataset.path;
+    const oldName = oldPath.split('/').pop();
+    
+    document.getElementById('rename-old-path').value = oldPath;
+    document.getElementById('rename-new-name').value = oldName;
+    document.getElementById('rename-modal').style.display = 'flex';
+}
+
+async function createNewFile() {
+    const basePath = document.getElementById('new-file-path').value;
+    const fileName = document.getElementById('new-file-name').value;
+    
+    if (!fileName) {
+        showMessage('请输入文件名', 'error');
+        return;
+    }
+    
+    const filePath = basePath + fileName;
+    
+    try {
+        const response = await fetch('/api/files/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                path: filePath,
+                content: '// New file created\n'
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showMessage('文件创建成功', 'success');
+            hideModals();
+            loadFileTree(); // 刷新文件树
+        } else {
+            showMessage('文件创建失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        showMessage('创建文件错误: ' + error.message, 'error');
+    }
+}
+
+async function createNewFolder() {
+    const basePath = document.getElementById('new-folder-path').value;
+    const folderName = document.getElementById('new-folder-name').value;
+    
+    if (!folderName) {
+        showMessage('请输入文件夹名', 'error');
+        return;
+    }
+    
+    const folderPath = basePath + folderName;
+    
+    try {
+        const response = await fetch('/api/files/mkdir', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                path: folderPath
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showMessage('文件夹创建成功', 'success');
+            hideModals();
+            loadFileTree(); // 刷新文件树
+        } else {
+            showMessage('文件夹创建失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        showMessage('创建文件夹错误: ' + error.message, 'error');
+    }
+}
+
+async function renameItem() {
+    const oldPath = document.getElementById('rename-old-path').value;
+    const newName = document.getElementById('rename-new-name').value;
+    
+    if (!newName) {
+        showMessage('请输入新名称', 'error');
+        return;
+    }
+    
+    const newPath = oldPath.split('/').slice(0, -1).join('/') + '/' + newName;
+    
+    try {
+        const response = await fetch('/api/files/rename', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                old_path: oldPath,
+                new_path: newPath
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showMessage('重命名成功', 'success');
+            hideModals();
+            loadFileTree(); // 刷新文件树
+            
+            // 如果重命名的是当前打开的文件，更新编辑器标题
+            if (currentFile === oldPath) {
+                currentFile = newPath;
+                updateEditorTitle(newPath);
+            }
+        } else {
+            showMessage('重命名失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        showMessage('重命名错误: ' + error.message, 'error');
+    }
+}
+
+async function deleteItem() {
+    if (!contextMenuTarget) return;
+    
+    const path = contextMenuTarget.dataset.path;
+    const type = contextMenuTarget.dataset.type;
+    
+    if (!confirm(`确定要删除${type === 'directory' ? '文件夹' : '文件'} "${path.split('/').pop()}" 吗？`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/files/delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                path: path
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showMessage('删除成功', 'success');
+            loadFileTree(); // 刷新文件树
+            
+            // 如果删除的是当前打开的文件，清空编辑器
+            if (currentFile === path) {
+                currentFile = null;
+                document.getElementById('editor').value = '';
+                updateEditorTitle('');
+            }
+        } else {
+            showMessage('删除失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        showMessage('删除错误: ' + error.message, 'error');
+    }
+}
+
 // 代码运行
 async function runCode() {
     if (!isAuthenticated) {
@@ -202,6 +629,11 @@ async function runCode() {
     if (!code.trim()) {
         showMessage('请输入代码', 'error');
         return;
+    }
+    
+    // 如果当前有打开的文件，保存文件
+    if (currentFile) {
+        await saveFile();
     }
     
     try {
@@ -235,10 +667,46 @@ async function runCode() {
     }
 }
 
-function saveCode() {
+async function saveFile() {
+    if (!currentFile) {
+        showMessage('没有打开的文件', 'error');
+        return;
+    }
+    
     const code = document.getElementById('editor').value;
-    localStorage.setItem('rust_code', code);
-    showMessage('代码已保存到本地', 'success');
+    
+    try {
+        const response = await fetch('/api/files/write', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                path: currentFile,
+                content: code
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            showMessage('文件保存成功', 'success');
+        } else {
+            showMessage('文件保存失败: ' + result.message, 'error');
+        }
+    } catch (error) {
+        showMessage('保存文件错误: ' + error.message, 'error');
+    }
+}
+
+function saveCode() {
+    if (currentFile) {
+        saveFile();
+    } else {
+        const code = document.getElementById('editor').value;
+        localStorage.setItem('rust_code', code);
+        showMessage('代码已保存到本地', 'success');
+    }
 }
 
 function loadSavedCode() {

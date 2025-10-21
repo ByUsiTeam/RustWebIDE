@@ -24,36 +24,49 @@
             </div>
         </div>
         
-        <div class="editor-container">
-            <div class="panel code-editor">
-                <div class="editor-toolbar">
-                    <h3>代码编辑器</h3>
-                    <div>
-                        <button class="btn btn-primary" onclick="runCode()">运行</button>
-                        <button class="btn btn-secondary" onclick="saveCode()">保存</button>
-                    </div>
+        <div class="main-content">
+            <!-- 文件浏览器 -->
+            <div class="file-explorer">
+                <div class="file-explorer-header">
+                    <h3>文件浏览器</h3>
                 </div>
-                <textarea id="editor" placeholder="在这里编写您的 Rust 代码...">fn main() {
-    println!("Hello, Rust Web IDE with Proot!");
-}</textarea>
+                <div id="file-tree" class="file-tree">
+                    <!-- 文件树将通过 JavaScript 动态生成 -->
+                </div>
             </div>
             
-            <div class="panel output-terminal">
-                <div class="tab-container">
-                    <button class="tab active" onclick="switchTab('output')">输出</button>
-                    <button class="tab" onclick="switchTab('terminal')">终端</button>
+            <!-- 编辑器区域 -->
+            <div class="editor-area">
+                <div class="panel code-editor">
+                    <div class="editor-toolbar">
+                        <h3>代码编辑器</h3>
+                        <div>
+                            <button class="btn btn-primary" onclick="runCode()">运行</button>
+                            <button class="btn btn-secondary" onclick="saveCode()">保存</button>
+                        </div>
+                    </div>
+                    <textarea id="editor" placeholder="在这里编写您的 Rust 代码...">fn main() {
+    println!("Hello, Rust Web IDE with Proot!");
+}</textarea>
                 </div>
                 
-                <div id="output-content" class="terminal-content">
-                    等待代码执行...
-                </div>
-                
-                <div id="terminal-content" class="terminal-content" style="display: none;">
-                    <div id="terminal-output" class="terminal-output"></div>
-                    <div class="input-group">
-                        <input type="text" id="terminal-input" class="terminal-input" 
-                               placeholder="输入命令..." onkeypress="handleTerminalInput(event)">
-                        <button class="btn btn-primary" onclick="sendTerminalCommand()">执行</button>
+                <div class="panel output-terminal">
+                    <div class="tab-container">
+                        <button class="tab active" onclick="switchTab('output')">输出</button>
+                        <button class="tab" onclick="switchTab('terminal')">终端</button>
+                    </div>
+                    
+                    <div id="output-content" class="terminal-content">
+                        等待代码执行...
+                    </div>
+                    
+                    <div id="terminal-content" class="terminal-content" style="display: none;">
+                        <div id="terminal-output" class="terminal-output"></div>
+                        <div class="input-group">
+                            <input type="text" id="terminal-input" class="terminal-input" 
+                                   placeholder="输入命令..." onkeypress="handleTerminalInput(event)">
+                            <button class="btn btn-primary" onclick="sendTerminalCommand()">执行</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -63,27 +76,29 @@
     <!-- 登录模态框 -->
     <div id="loginModal" class="modal">
         <div class="modal-content">
-            <h3>ByUsi账号用户登录</h3>
+            <h3>ByUsi账户登录</h3>
             <div class="form-group">
-                <label>用户名/邮箱:</label>
-                <input type="text" id="loginIdentifier" placeholder="输入用户名或邮箱">
+                <label>ByUsi账户名/邮箱:</label>
+                <input type="text" id="loginIdentifier" placeholder="输入ByUsi账户名或邮箱">
             </div>
             <div class="form-group">
                 <label>密码:</label>
                 <input type="password" id="loginPassword" placeholder="输入密码">
             </div>
-            <button class="btn btn-primary" onclick="login()" style="width: 100%;">登录</button>
-            <button class="btn" onclick="hideModals()" style="width: 100%; margin-top: 10px; background: #f0f0f0;">取消</button>
+            <div class="form-actions">
+                <button class="btn btn-primary" onclick="login()">登录</button>
+                <button class="btn" onclick="hideModals()">取消</button>
+            </div>
         </div>
     </div>
     
     <!-- 注册模态框 -->
     <div id="registerModal" class="modal">
         <div class="modal-content">
-            <h3>ByUsi账户用户注册</h3>
+            <h3>ByUsi账户注册</h3>
             <div class="form-group">
-                <label>用户名:</label>
-                <input type="text" id="registerUsername" placeholder="输入用户名">
+                <label>ByUsi账户名:</label>
+                <input type="text" id="registerUsername" placeholder="输入ByUsi账户名">
             </div>
             <div class="form-group">
                 <label>邮箱:</label>
@@ -93,9 +108,73 @@
                 <label>密码:</label>
                 <input type="password" id="registerPassword" placeholder="输入密码">
             </div>
-            <button class="btn btn-primary" onclick="register()" style="width: 100%;">注册</button>
-            <button class="btn" onclick="hideModals()" style="width: 100%; margin-top: 10px; background: #f0f0f0;">取消</button>
+            <div class="form-actions">
+                <button class="btn btn-primary" onclick="register()">注册</button>
+                <button class="btn" onclick="hideModals()">取消</button>
+            </div>
         </div>
+    </div>
+    
+    <!-- 创建文件模态框 -->
+    <div id="create-file-modal" class="modal">
+        <div class="modal-content">
+            <h3>创建文件</h3>
+            <div class="form-group">
+                <label>路径:</label>
+                <input type="text" id="new-file-path" readonly>
+            </div>
+            <div class="form-group">
+                <label>文件名:</label>
+                <input type="text" id="new-file-name" placeholder="输入文件名">
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" id="create-file-confirm">创建</button>
+                <button class="btn" onclick="hideModals()">取消</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 创建文件夹模态框 -->
+    <div id="create-folder-modal" class="modal">
+        <div class="modal-content">
+            <h3>创建文件夹</h3>
+            <div class="form-group">
+                <label>路径:</label>
+                <input type="text" id="new-folder-path" readonly>
+            </div>
+            <div class="form-group">
+                <label>文件夹名:</label>
+                <input type="text" id="new-folder-name" placeholder="输入文件夹名">
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" id="create-folder-confirm">创建</button>
+                <button class="btn" onclick="hideModals()">取消</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 重命名模态框 -->
+    <div id="rename-modal" class="modal">
+        <div class="modal-content">
+            <h3>重命名</h3>
+            <div class="form-group">
+                <label>新名称:</label>
+                <input type="text" id="rename-new-name" placeholder="输入新名称">
+                <input type="hidden" id="rename-old-path">
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" id="rename-confirm">重命名</button>
+                <button class="btn" onclick="hideModals()">取消</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 右键菜单 -->
+    <div id="context-menu" class="context-menu">
+        <div class="context-menu-item" data-action="new-file">新建文件</div>
+        <div class="context-menu-item" data-action="new-folder">新建文件夹</div>
+        <div class="context-menu-item" data-action="rename">重命名</div>
+        <div class="context-menu-item" data-action="delete" style="color: #e74c3c;">删除</div>
     </div>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>

@@ -84,6 +84,127 @@ class UserDB:
             return self._save_db()
         return False
 
+class FileManager:
+    @staticmethod
+    def get_file_tree(env_path, base_path="/home/user"):
+        """获取文件树结构"""
+        full_path = os.path.join(env_path, base_path.lstrip('/'))
+        
+        if not os.path.exists(full_path):
+            return None
+        
+        def build_tree(path, relative_path):
+            tree = {
+                'name': os.path.basename(path),
+                'path': relative_path,
+                'type': 'directory',
+                'children': []
+            }
+            
+            try:
+                items = os.listdir(path)
+                for item in sorted(items):
+                    item_path = os.path.join(path, item)
+                    item_relative_path = os.path.join(relative_path, item)
+                    
+                    if os.path.isdir(item_path):
+                        tree['children'].append(build_tree(item_path, item_relative_path))
+                    else:
+                        tree['children'].append({
+                            'name': item,
+                            'path': item_relative_path,
+                            'type': 'file',
+                            'extension': os.path.splitext(item)[1].lower()
+                        })
+            except PermissionError:
+                pass
+            
+            return tree
+        
+        return build_tree(full_path, base_path)
+    
+    @staticmethod
+    def create_file(env_path, file_path, content=""):
+        """创建文件"""
+        full_path = os.path.join(env_path, file_path.lstrip('/'))
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        
+        try:
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return True
+        except Exception as e:
+            print(f"创建文件失败: {e}")
+            return False
+    
+    @staticmethod
+    def create_directory(env_path, dir_path):
+        """创建目录"""
+        full_path = os.path.join(env_path, dir_path.lstrip('/'))
+        
+        try:
+            os.makedirs(full_path, exist_ok=True)
+            return True
+        except Exception as e:
+            print(f"创建目录失败: {e}")
+            return False
+    
+    @staticmethod
+    def read_file(env_path, file_path):
+        """读取文件内容"""
+        full_path = os.path.join(env_path, file_path.lstrip('/'))
+        
+        try:
+            with open(full_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception as e:
+            print(f"读取文件失败: {e}")
+            return None
+    
+    @staticmethod
+    def write_file(env_path, file_path, content):
+        """写入文件内容"""
+        full_path = os.path.join(env_path, file_path.lstrip('/'))
+        
+        try:
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return True
+        except Exception as e:
+            print(f"写入文件失败: {e}")
+            return False
+    
+    @staticmethod
+    def delete_path(env_path, path):
+        """删除文件或目录"""
+        full_path = os.path.join(env_path, path.lstrip('/'))
+        
+        try:
+            if os.path.isdir(full_path):
+                import shutil
+                shutil.rmtree(full_path)
+            else:
+                os.remove(full_path)
+            return True
+        except Exception as e:
+            print(f"删除失败: {e}")
+            return False
+    
+    @staticmethod
+    def rename_path(env_path, old_path, new_path):
+        """重命名文件或目录"""
+        old_full_path = os.path.join(env_path, old_path.lstrip('/'))
+        new_full_path = os.path.join(env_path, new_path.lstrip('/'))
+        
+        try:
+            os.rename(old_full_path, new_full_path)
+            return True
+        except Exception as e:
+            print(f"重命名失败: {e}")
+            return False
+
 class ByUsiAuth:
     @staticmethod
     def register(username, email, password):
@@ -298,6 +419,7 @@ edition = "2021"
 auth_manager = ByUsiAuth()
 user_db = UserDB(Config.USER_DB_PATH)
 proot_manager = ProotEnvironmentManager()
+file_manager = FileManager()
 terminal_manager = PythonTerminalManager()
 
 # WebSocket 连接管理
@@ -386,6 +508,178 @@ def index():
     
     # 没有有效会话，显示登录界面
     return render_template('index.html')
+
+# 文件管理 API
+@app.route('/api/files/tree', methods=['GET'])
+def api_files_tree():
+    """获取文件树"""
+    if 'environment_id' not in session or 'user_id' not in session:
+        return jsonify({"status": "error", "message": "Not authenticated"})
+    
+    env_id = session['environment_id']
+    env = proot_manager.environments.get(env_id)
+    if not env:
+        return jsonify({"status": "error", "message": "Environment not found"})
+    
+    path = request.args.get('path', '/home/user')
+    tree = file_manager.get_file_tree(env['path'], path)
+    
+    if tree is None:
+        return jsonify({"status": "error", "message": "Path not found"})
+    
+    return jsonify({
+        "status": "success",
+        "tree": tree
+    })
+
+@app.route('/api/files/read', methods=['GET'])
+def api_files_read():
+    """读取文件内容"""
+    if 'environment_id' not in session or 'user_id' not in session:
+        return jsonify({"status": "error", "message": "Not authenticated"})
+    
+    env_id = session['environment_id']
+    env = proot_manager.environments.get(env_id)
+    if not env:
+        return jsonify({"status": "error", "message": "Environment not found"})
+    
+    file_path = request.args.get('path', '')
+    if not file_path:
+        return jsonify({"status": "error", "message": "No file path specified"})
+    
+    content = file_manager.read_file(env['path'], file_path)
+    
+    if content is None:
+        return jsonify({"status": "error", "message": "File not found or cannot be read"})
+    
+    return jsonify({
+        "status": "success",
+        "content": content,
+        "path": file_path
+    })
+
+@app.route('/api/files/write', methods=['POST'])
+def api_files_write():
+    """写入文件内容"""
+    if 'environment_id' not in session or 'user_id' not in session:
+        return jsonify({"status": "error", "message": "Not authenticated"})
+    
+    env_id = session['environment_id']
+    env = proot_manager.environments.get(env_id)
+    if not env:
+        return jsonify({"status": "error", "message": "Environment not found"})
+    
+    data = request.json
+    file_path = data.get('path', '')
+    content = data.get('content', '')
+    
+    if not file_path:
+        return jsonify({"status": "error", "message": "No file path specified"})
+    
+    success = file_manager.write_file(env['path'], file_path, content)
+    
+    if success:
+        return jsonify({"status": "success", "message": "File saved"})
+    else:
+        return jsonify({"status": "error", "message": "Failed to save file"})
+
+@app.route('/api/files/create', methods=['POST'])
+def api_files_create():
+    """创建文件"""
+    if 'environment_id' not in session or 'user_id' not in session:
+        return jsonify({"status": "error", "message": "Not authenticated"})
+    
+    env_id = session['environment_id']
+    env = proot_manager.environments.get(env_id)
+    if not env:
+        return jsonify({"status": "error", "message": "Environment not found"})
+    
+    data = request.json
+    file_path = data.get('path', '')
+    content = data.get('content', '')
+    
+    if not file_path:
+        return jsonify({"status": "error", "message": "No file path specified"})
+    
+    success = file_manager.create_file(env['path'], file_path, content)
+    
+    if success:
+        return jsonify({"status": "success", "message": "File created"})
+    else:
+        return jsonify({"status": "error", "message": "Failed to create file"})
+
+@app.route('/api/files/mkdir', methods=['POST'])
+def api_files_mkdir():
+    """创建目录"""
+    if 'environment_id' not in session or 'user_id' not in session:
+        return jsonify({"status": "error", "message": "Not authenticated"})
+    
+    env_id = session['environment_id']
+    env = proot_manager.environments.get(env_id)
+    if not env:
+        return jsonify({"status": "error", "message": "Environment not found"})
+    
+    data = request.json
+    dir_path = data.get('path', '')
+    
+    if not dir_path:
+        return jsonify({"status": "error", "message": "No directory path specified"})
+    
+    success = file_manager.create_directory(env['path'], dir_path)
+    
+    if success:
+        return jsonify({"status": "success", "message": "Directory created"})
+    else:
+        return jsonify({"status": "error", "message": "Failed to create directory"})
+
+@app.route('/api/files/delete', methods=['POST'])
+def api_files_delete():
+    """删除文件或目录"""
+    if 'environment_id' not in session or 'user_id' not in session:
+        return jsonify({"status": "error", "message": "Not authenticated"})
+    
+    env_id = session['environment_id']
+    env = proot_manager.environments.get(env_id)
+    if not env:
+        return jsonify({"status": "error", "message": "Environment not found"})
+    
+    data = request.json
+    path = data.get('path', '')
+    
+    if not path:
+        return jsonify({"status": "error", "message": "No path specified"})
+    
+    success = file_manager.delete_path(env['path'], path)
+    
+    if success:
+        return jsonify({"status": "success", "message": "Path deleted"})
+    else:
+        return jsonify({"status": "error", "message": "Failed to delete path"})
+
+@app.route('/api/files/rename', methods=['POST'])
+def api_files_rename():
+    """重命名文件或目录"""
+    if 'environment_id' not in session or 'user_id' not in session:
+        return jsonify({"status": "error", "message": "Not authenticated"})
+    
+    env_id = session['environment_id']
+    env = proot_manager.environments.get(env_id)
+    if not env:
+        return jsonify({"status": "error", "message": "Environment not found"})
+    
+    data = request.json
+    old_path = data.get('old_path', '')
+    new_path = data.get('new_path', '')
+    
+    if not old_path or not new_path:
+        return jsonify({"status": "error", "message": "No path specified"})
+    
+    success = file_manager.rename_path(env['path'], old_path, new_path)
+    
+    if success:
+        return jsonify({"status": "success", "message": "Path renamed"})
+    else:
+        return jsonify({"status": "error", "message": "Failed to rename path"})
 
 @app.route('/api/check_auth', methods=['GET'])
 def api_check_auth():
@@ -549,6 +843,7 @@ if __name__ == '__main__':
     print(f"访问地址: http://127.0.0.1:5554")
     print(f"WebSocket 支持: 已启用")
     print(f"Proot 环境: {'可用' if proot_manager._has_proot() else '不可用'}")
+    print(f"文件管理: 已启用")
     print(f"用户数据库: {Config.USER_DB_PATH}")
     print("=" * 50)
     
