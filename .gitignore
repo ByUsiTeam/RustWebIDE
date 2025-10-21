@@ -4,3 +4,4 @@
 /logs
 *.bak.zip
 /user_db.json
+/proot_environments
