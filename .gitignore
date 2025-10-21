@@ -3,3 +3,4 @@
 /workspace
 /logs
 *.bak.zip
+/user_db.json
