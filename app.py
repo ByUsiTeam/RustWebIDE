@@ -3,6 +3,7 @@ import json
 import subprocess
 import uuid
 import time
+import threading
 from flask import Flask, request, jsonify, render_template, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
@@ -27,9 +28,9 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode=Config.SOCKETIO_AS
 
 # 导入终端绑定
 try:
-    from python_terminal import start_terminal_session, execute_terminal_command, close_terminal_session, PythonTerminalManager
+    from simple_terminal import start_terminal_session, execute_terminal_command, close_terminal_session
     CPP_TERMINAL_AVAILABLE = False
-    print("使用 Python 终端实现")
+    print("使用简化 Python 终端实现")
 except ImportError as e:
     print(f"终端模块导入失败: {e}")
     CPP_TERMINAL_AVAILABLE = False
@@ -83,6 +84,20 @@ class UserDB:
             self.data[user_id_str]['last_used'] = time.time()
             return self._save_db()
         return False
+    
+    def set_proot_initialized(self, user_id, initialized=True):
+        """设置 proot 环境初始化状态"""
+        user_id_str = str(user_id)
+        if user_id_str not in self.data:
+            self.data[user_id_str] = {}
+        
+        self.data[user_id_str]['proot_initialized'] = initialized
+        return self._save_db()
+    
+    def is_proot_initialized(self, user_id):
+        """检查 proot 环境是否已初始化"""
+        user_id_str = str(user_id)
+        return self.data.get(user_id_str, {}).get('proot_initialized', False)
 
 class FileManager:
     @staticmethod
@@ -94,8 +109,12 @@ class FileManager:
             return None
         
         def build_tree(path, relative_path):
+            name = os.path.basename(path)
+            if not name:
+                name = "/"
+                
             tree = {
-                'name': os.path.basename(path),
+                'name': name,
                 'path': relative_path,
                 'type': 'directory',
                 'children': []
@@ -103,7 +122,7 @@ class FileManager:
             
             try:
                 items = os.listdir(path)
-                for item in sorted(items):
+                for item in sorted(items, key=lambda x: (not os.path.isdir(os.path.join(path, x)), x.lower())):
                     item_path = os.path.join(path, item)
                     item_relative_path = os.path.join(relative_path, item)
                     
@@ -248,51 +267,36 @@ class ByUsiAuth:
 class ProotEnvironmentManager:
     def __init__(self):
         self.environments = {}
+        self.initialization_tasks = {}  # 跟踪初始化任务
     
     def create_environment(self, user_id):
         env_id = str(uuid.uuid4())
         user_env_path = os.path.join(Config.PROOT_ENV_BASE, str(user_id), env_id)
         os.makedirs(user_env_path, exist_ok=True)
         
-        # 创建基础的 proot 环境
-        self._init_proot_environment(user_env_path)
+        # 创建简化的环境（不立即初始化完整的 Debian）
+        self._init_simple_environment(user_env_path)
         
         environment = {
             'id': env_id,
             'path': user_env_path,
             'user_id': user_id,
-            'created_at': time.time()
+            'created_at': time.time(),
+            'initialized': False  # 标记为未初始化完整环境
         }
         
         self.environments[env_id] = environment
         return env_id
     
-    def _init_proot_environment(self, env_path):
-        """初始化 proot 环境"""
+    def _init_simple_environment(self, env_path):
+        """初始化简化环境（基础文件结构）"""
         # 创建基础目录结构
-        dirs = ['bin', 'lib', 'usr', 'home', 'tmp', 'proc', 'dev']
+        dirs = ['home/user', 'home/user/projects', 'tmp']
         for dir_name in dirs:
             os.makedirs(os.path.join(env_path, dir_name), exist_ok=True)
         
-        # 创建基本的启动脚本
-        startup_script = """#!/bin/sh
-export PATH=/bin:/usr/bin:$PATH
-export HOME=/home/user
-export TERM=xterm-256color
-cd $HOME
-exec /bin/sh "$@"
-"""
-        with open(os.path.join(env_path, "start.sh"), "w") as f:
-            f.write(startup_script)
-        
-        os.chmod(os.path.join(env_path, "start.sh"), 0o755)
-        
-        # 创建用户 home 目录
-        user_home = os.path.join(env_path, "home", "user")
-        os.makedirs(user_home, exist_ok=True)
-        
-        # 初始化 Rust 项目
-        self._init_rust_project(user_home)
+        # 初始化基础的 Rust 项目
+        self._init_rust_project(os.path.join(env_path, "home/user"))
     
     def _init_rust_project(self, workspace):
         cargo_toml = """[package]
@@ -309,51 +313,152 @@ edition = "2021"
         src_dir = os.path.join(workspace, "src")
         os.makedirs(src_dir, exist_ok=True)
         main_rs = """fn main() {
-    println!("Hello, Rust Web IDE with Proot!");
+    println!("Hello, Rust Web IDE!");
+    
+    // 初始化基础环境后，您将获得完整的 Debian 12 环境
+    // 包含完整的 Rust 工具链和开发环境
+    println!("运行 '初始化 Debian 环境' 来获得完整功能");
 }
 """
         main_path = os.path.join(src_dir, "main.rs")
         with open(main_path, "w", encoding='utf-8') as f:
             f.write(main_rs)
     
-    def execute_in_environment(self, env_id, command, cwd=None, use_proot=True):
+    def initialize_debian_environment(self, env_id, progress_callback=None):
+        """初始化完整的 Debian 12 环境"""
         if env_id not in self.environments:
             return {"status": "error", "message": "Environment not found"}
         
         env = self.environments[env_id]
         env_path = env['path']
         
+        def update_progress(stage, message, percent):
+            if progress_callback:
+                progress_callback(stage, message, percent)
+        
         try:
-            if use_proot and self._has_proot():
+            update_progress("starting", "开始初始化 Debian 12 环境...", 0)
+            
+            # 运行初始化脚本
+            init_script = os.path.join(BASE_DIR, "scripts", "init_debian.sh")
+            if not os.path.exists(init_script):
+                return {"status": "error", "message": "初始化脚本不存在"}
+            
+            update_progress("downloading", "下载 Debian 12 rootfs...", 20)
+            
+            # 在后台线程中运行初始化
+            def run_initialization():
+                try:
+                    process = subprocess.Popen(
+                        [init_script, env_path, str(env['user_id'])],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1
+                    )
+                    
+                    for line in process.stdout:
+                        if "进度" in line or "progress" in line.lower():
+                            # 解析进度信息
+                            pass
+                        update_progress("installing", line.strip(), 50)
+                    
+                    process.wait()
+                    
+                    if process.returncode == 0:
+                        # 标记环境为已初始化
+                        env['initialized'] = True
+                        user_db.set_proot_initialized(env['user_id'], True)
+                        update_progress("complete", "Debian 12 环境初始化完成!", 100)
+                    else:
+                        update_progress("error", f"初始化失败，退出码: {process.returncode}", 0)
+                        
+                except Exception as e:
+                    update_progress("error", f"初始化过程出错: {str(e)}", 0)
+            
+            # 启动初始化线程
+            thread = threading.Thread(target=run_initialization)
+            thread.daemon = True
+            thread.start()
+            
+            return {"status": "success", "message": "初始化已开始"}
+            
+        except Exception as e:
+            return {"status": "error", "message": f"初始化失败: {str(e)}"}
+    
+    def is_environment_initialized(self, env_id):
+        """检查环境是否已初始化"""
+        if env_id not in self.environments:
+            return False
+        return self.environments[env_id].get('initialized', False)
+    
+    def execute_in_environment(self, env_id, command, cwd=None, input_data=""):
+        if env_id not in self.environments:
+            return {"status": "error", "message": "Environment not found"}
+        
+        env = self.environments[env_id]
+        env_path = env['path']
+        
+        # 如果环境已初始化，使用 proot 执行
+        if env.get('initialized', False) and self._has_proot():
+            try:
                 # 使用 proot 执行命令
+                start_script = os.path.join(env_path, "start.sh")
                 proot_cmd = [
-                    "proot", 
-                    "-S", env_path,
-                    "-w", cwd or "/home/user",
-                    "sh", "-c", command
+                    "sh", "-c", f"cd {cwd or '/home/user'} && {command}"
                 ]
+                
                 result = subprocess.run(
                     proot_cmd,
+                    input=input_data,
                     capture_output=True,
                     text=True,
                     timeout=30
                 )
-            else:
-                # 直接执行命令（在宿主机环境）
-                if cwd:
-                    original_cwd = os.getcwd()
+                
+                return {
+                    "status": "success",
+                    "output": result.stdout,
+                    "error": result.stderr,
+                    "exit_code": result.returncode
+                }
+                
+            except subprocess.TimeoutExpired:
+                return {"status": "timeout", "message": "Execution timeout"}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+        else:
+            # 使用简化环境执行
+            return self._execute_in_simple_environment(env_id, command, cwd, input_data)
+    
+    def _execute_in_simple_environment(self, env_id, command, cwd=None, input_data=""):
+        """在简化环境中执行命令"""
+        if env_id not in self.environments:
+            return {"status": "error", "message": "Environment not found"}
+        
+        env = self.environments[env_id]
+        workspace = os.path.join(env['path'], "home", "user")
+        
+        try:
+            # 直接在宿主机执行命令
+            if cwd:
+                original_cwd = os.getcwd()
+                try:
                     os.chdir(cwd)
-                
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                
-                if cwd:
-                    os.chdir(original_cwd)
+                except:
+                    pass  # 如果目录不存在，忽略错误
+            
+            result = subprocess.run(
+                command,
+                shell=True,
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if cwd:
+                os.chdir(original_cwd)
             
             return {
                 "status": "success",
@@ -389,29 +494,49 @@ edition = "2021"
                 f.write(code)
             
             # 编译并运行
-            compile_result = self.execute_in_environment(
-                env_id, 
-                "cargo build --release",
-                cwd="/home/user"
+            return self._compile_and_run_directly(workspace, input_data)
+            
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    
+    def _compile_and_run_directly(self, workspace, input_data):
+        """直接在宿主机环境中编译和运行 Rust 代码"""
+        try:
+            # 编译
+            compile_process = subprocess.run(
+                ["cargo", "build", "--release"],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=30
             )
             
-            if compile_result['status'] != 'success' or compile_result['exit_code'] != 0:
+            if compile_process.returncode != 0:
                 return {
                     "status": "compile_error",
-                    "output": compile_result.get('error', '') + compile_result.get('output', ''),
-                    "exit_code": compile_result.get('exit_code', 1)
+                    "output": compile_process.stderr,
+                    "exit_code": compile_process.returncode
                 }
             
-            # 运行程序
-            run_result = self.execute_in_environment(
-                env_id,
-                "./target/release/user_project",
-                cwd="/home/user",
-                input_data=input_data
+            # 运行
+            executable_path = os.path.join(workspace, "target", "release", "user_project")
+            run_process = subprocess.run(
+                [executable_path],
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=10
             )
             
-            return run_result
+            return {
+                "status": "success",
+                "output": run_process.stdout,
+                "error": run_process.stderr,
+                "exit_code": run_process.returncode
+            }
             
+        except subprocess.TimeoutExpired:
+            return {"status": "timeout", "message": "Execution timeout"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -420,10 +545,10 @@ auth_manager = ByUsiAuth()
 user_db = UserDB(Config.USER_DB_PATH)
 proot_manager = ProotEnvironmentManager()
 file_manager = FileManager()
-terminal_manager = PythonTerminalManager()
 
 # WebSocket 连接管理
 connected_terminals = {}
+initialization_progress = {}
 
 @socketio.on('connect')
 def handle_connect():
@@ -462,7 +587,10 @@ def handle_start_terminal(data):
         connected_terminals[request.sid] = terminal_id
         emit('terminal_started', {'terminal_id': terminal_id})
         # 发送欢迎信息
-        emit('terminal_output', {'output': 'Terminal started in proot environment\r\n$ '})
+        welcome_msg = '终端已启动'
+        if not env.get('initialized', False):
+            welcome_msg += ' (基础模式 - 请初始化 Debian 环境以获得完整功能)'
+        emit('terminal_output', {'output': welcome_msg + '\r\n$ '})
     else:
         emit('terminal_output', {'output': 'Error: Failed to start terminal\r\n'})
 
@@ -485,6 +613,67 @@ def handle_terminal_input(data):
         emit('terminal_output', {'output': result['output'] + '\r\n$ '})
     else:
         emit('terminal_output', {'output': f"Error: {result['message']}\r\n$ "})
+
+# 初始化相关的 WebSocket 事件
+@socketio.on('check_initialization')
+def handle_check_initialization(data):
+    """检查环境初始化状态"""
+    user_id = session.get('user_id')
+    if not user_id:
+        emit('initialization_status', {'initialized': False, 'message': '用户未登录'})
+        return
+    
+    env_id = user_db.get_user_environment(user_id)
+    if not env_id:
+        emit('initialization_status', {'initialized': False, 'message': '环境不存在'})
+        return
+    
+    initialized = proot_manager.is_environment_initialized(env_id)
+    emit('initialization_status', {
+        'initialized': initialized,
+        'message': '环境已初始化' if initialized else '环境未初始化'
+    })
+
+@socketio.on('start_initialization')
+def handle_start_initialization(data):
+    """开始初始化 Debian 环境"""
+    user_id = session.get('user_id')
+    if not user_id:
+        emit('initialization_progress', {'stage': 'error', 'message': '用户未登录', 'percent': 0})
+        return
+    
+    env_id = user_db.get_user_environment(user_id)
+    if not env_id:
+        emit('initialization_progress', {'stage': 'error', 'message': '环境不存在', 'percent': 0})
+        return
+    
+    # 检查是否已经在初始化
+    if user_id in initialization_progress:
+        emit('initialization_progress', {'stage': 'error', 'message': '初始化正在进行中', 'percent': 0})
+        return
+    
+    # 定义进度回调函数
+    def progress_callback(stage, message, percent):
+        emit('initialization_progress', {
+            'stage': stage,
+            'message': message,
+            'percent': percent
+        })
+        initialization_progress[user_id] = {
+            'stage': stage,
+            'message': message,
+            'percent': percent
+        }
+    
+    # 开始初始化
+    result = proot_manager.initialize_debian_environment(env_id, progress_callback)
+    
+    if result['status'] == 'success':
+        emit('initialization_progress', {'stage': 'started', 'message': '初始化已开始', 'percent': 0})
+    else:
+        emit('initialization_progress', {'stage': 'error', 'message': result['message'], 'percent': 0})
+        if user_id in initialization_progress:
+            del initialization_progress[user_id]
 
 @app.before_request
 def before_request():
@@ -688,15 +877,24 @@ def api_check_auth():
         user_info = auth_manager.get_user_info(session['user_token'])
         if user_info.get('status') == 'success':
             user_data = user_info.get('data', {})
+            
+            # 检查环境初始化状态
+            env_id = user_db.get_user_environment(user_data['id'])
+            initialized = False
+            if env_id:
+                initialized = proot_manager.is_environment_initialized(env_id)
+            
             return jsonify({
                 "status": "success",
                 "authenticated": True,
-                "user": user_data
+                "user": user_data,
+                "environment_initialized": initialized
             })
     
     return jsonify({
         "status": "success",
-        "authenticated": False
+        "authenticated": False,
+        "environment_initialized": False
     })
 
 @app.route('/api/register', methods=['POST'])
@@ -802,6 +1000,19 @@ def api_terminal_execute():
     result = execute_terminal_command(terminal_id, command)
     return jsonify(result)
 
+@app.route('/api/initialize_environment', methods=['POST'])
+def api_initialize_environment():
+    """初始化用户环境 API"""
+    if 'environment_id' not in session or 'user_id' not in session:
+        return jsonify({"status": "error", "message": "Not authenticated"})
+    
+    env_id = session['environment_id']
+    
+    # 开始初始化
+    result = proot_manager.initialize_debian_environment(env_id)
+    
+    return jsonify(result)
+
 @app.route('/api/logout', methods=['POST'])
 def api_logout():
     # 清理终端会话
@@ -822,12 +1033,16 @@ def api_system_info():
     env_count = len(proot_manager.environments)
     user_count = len(user_db.data)
     
+    # 统计已初始化的环境
+    initialized_count = sum(1 for env in proot_manager.environments.values() if env.get('initialized', False))
+    
     return jsonify({
         "status": "success",
         "data": {
             "proot_available": proot_available,
             "environments_count": env_count,
             "users_count": user_count,
+            "initialized_environments": initialized_count,
             "terminal_available": True
         }
     })
@@ -837,6 +1052,13 @@ if __name__ == '__main__':
     os.makedirs(os.path.join(BASE_DIR, "workspace"), exist_ok=True)
     os.makedirs(os.path.join(BASE_DIR, "proot_environments"), exist_ok=True)
     os.makedirs(os.path.join(BASE_DIR, "logs"), exist_ok=True)
+    os.makedirs(os.path.join(BASE_DIR, "scripts"), exist_ok=True)
+    os.makedirs(os.path.join(BASE_DIR, "static", "icons"), exist_ok=True)
+    
+    # 确保初始化脚本存在且可执行
+    init_script = os.path.join(BASE_DIR, "scripts", "init_debian.sh")
+    if not os.path.exists(init_script):
+        print("警告: 初始化脚本不存在，请确保 scripts/init_debian.sh 已创建")
     
     print("=" * 50)
     print("Rust Web IDE 启动成功!")
@@ -844,6 +1066,7 @@ if __name__ == '__main__':
     print(f"WebSocket 支持: 已启用")
     print(f"Proot 环境: {'可用' if proot_manager._has_proot() else '不可用'}")
     print(f"文件管理: 已启用")
+    print(f"Debian 初始化: 已启用")
     print(f"用户数据库: {Config.USER_DB_PATH}")
     print("=" * 50)
     

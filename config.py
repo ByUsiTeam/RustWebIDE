@@ -1,5 +1,4 @@
 import os
-import json
 
 # 获取当前文件所在目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,12 +18,16 @@ class Config:
     SESSION_COOKIE_SECURE = False  # 在 Termux 中设为 False
     PERMANENT_SESSION_LIFETIME = 86400 * 30  # 30天
     
+    # 执行配置
     MAX_EXECUTION_TIME = 30
     MAX_MEMORY_MB = 512
     MAX_TERMINAL_SESSIONS = 100
     TERMINAL_TIMEOUT = 3600
-    ALLOWED_EXTENSIONS = {'rs', 'toml'}
+    ALLOWED_EXTENSIONS = {'rs', 'toml', 'txt', 'md', 'json', 'py', 'js', 'html', 'css', 'sh'}
     MAX_FILE_SIZE = 10 * 1024 * 1024
     
     # WebSocket 配置
     SOCKETIO_ASYNC_MODE = 'eventlet'
+    
+    # 环境配置
+    USE_PROOT = True

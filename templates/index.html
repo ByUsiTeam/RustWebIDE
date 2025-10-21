@@ -8,28 +8,40 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
-    <div class="container">
+    <div id="app">
+        <!-- 顶部栏 -->
         <div class="header">
-            <h1>Rust Web IDE</h1>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button id="mobile-menu-btn" class="mobile-menu-btn">☰</button>
+                <h1>Rust Web IDE</h1>
+                <span id="connection-status" class="connection-status connecting"></span>
+            </div>
+            
             <div class="auth-section">
                 <div id="userInfo" class="user-info" style="display: none;">
-                    <span id="username"></span>
-                    <button class="btn btn-info" onclick="showSystemInfo()">系统信息</button>
-                    <button class="btn btn-danger" onclick="logout()">退出</button>
+                    <span class="username" id="username"></span>
+                    <button class="btn btn-info" id="system-info-btn">系统信息</button>
+                    <button class="btn btn-danger" id="logout-btn">退出</button>
                 </div>
                 <div id="authButtons">
-                    <button class="btn btn-primary" onclick="showLogin()">登录</button>
-                    <button class="btn btn-secondary" onclick="showRegister()">注册</button>
+                    <button class="btn btn-primary" id="login-btn">登录</button>
+                    <button class="btn btn-secondary" id="register-btn">注册</button>
                 </div>
             </div>
         </div>
         
+        <!-- 主内容区域 -->
         <div class="main-content">
-            <!-- 文件浏览器 -->
-            <div class="file-explorer">
-                <div class="file-explorer-header">
-                    <h3>文件浏览器</h3>
+            <!-- 侧边栏 -->
+            <div id="sidebar" class="sidebar">
+                <div class="sidebar-header">
+                    <div class="sidebar-title">文件资源管理器</div>
+                    <div class="sidebar-actions">
+                        <button class="sidebar-action" id="refresh-tree" title="刷新">↻</button>
+                        <button class="sidebar-action" id="sidebar-toggle" title="折叠侧边栏">◀</button>
+                    </div>
                 </div>
+                
                 <div id="file-tree" class="file-tree">
                     <!-- 文件树将通过 JavaScript 动态生成 -->
                 </div>
@@ -37,36 +49,36 @@
             
             <!-- 编辑器区域 -->
             <div class="editor-area">
-                <div class="panel code-editor">
-                    <div class="editor-toolbar">
-                        <h3>代码编辑器</h3>
-                        <div>
-                            <button class="btn btn-primary" onclick="runCode()">运行</button>
-                            <button class="btn btn-secondary" onclick="saveCode()">保存</button>
-                        </div>
-                    </div>
-                    <textarea id="editor" placeholder="在这里编写您的 Rust 代码...">fn main() {
-    println!("Hello, Rust Web IDE with Proot!");
-}</textarea>
+                <!-- 编辑器标签页 -->
+                <div id="editor-tabs" class="editor-tabs">
+                    <!-- 标签页将通过 JavaScript 动态生成 -->
                 </div>
                 
-                <div class="panel output-terminal">
-                    <div class="tab-container">
-                        <button class="tab active" onclick="switchTab('output')">输出</button>
-                        <button class="tab" onclick="switchTab('terminal')">终端</button>
+                <!-- 编辑器工具栏 -->
+                <div class="editor-toolbar">
+                    <div class="editor-title" id="editor-title">无文件打开</div>
+                    <div>
+                        <button class="btn btn-primary" id="run-btn">运行</button>
+                        <button class="btn" id="save-btn">保存</button>
                     </div>
-                    
-                    <div id="output-content" class="terminal-content">
-                        等待代码执行...
+                </div>
+                
+                <!-- 代码编辑器 -->
+                <div class="editor-container">
+                    <textarea id="editor" placeholder="打开文件开始编辑..."></textarea>
+                </div>
+                
+                <!-- 终端区域 -->
+                <div class="terminal-container">
+                    <div class="terminal-header">
+                        <div class="terminal-title">终端</div>
                     </div>
-                    
-                    <div id="terminal-content" class="terminal-content" style="display: none;">
-                        <div id="terminal-output" class="terminal-output"></div>
-                        <div class="input-group">
-                            <input type="text" id="terminal-input" class="terminal-input" 
-                                   placeholder="输入命令..." onkeypress="handleTerminalInput(event)">
-                            <button class="btn btn-primary" onclick="sendTerminalCommand()">执行</button>
-                        </div>
+                    <div id="terminal-content" class="terminal-content">
+                        <!-- 终端输出将在这里显示 -->
+                    </div>
+                    <div class="terminal-input-container">
+                        <input type="text" id="terminal-input" placeholder="输入命令...">
+                        <button class="btn btn-primary" id="terminal-send">发送</button>
                     </div>
                 </div>
             </div>
@@ -76,10 +88,10 @@
     <!-- 登录模态框 -->
     <div id="loginModal" class="modal">
         <div class="modal-content">
-            <h3>ByUsi账户登录</h3>
+            <h3>用户登录</h3>
             <div class="form-group">
-                <label>ByUsi账户名/邮箱:</label>
-                <input type="text" id="loginIdentifier" placeholder="输入ByUsi账户名或邮箱">
+                <label>用户名/邮箱:</label>
+                <input type="text" id="loginIdentifier" placeholder="输入用户名或邮箱">
             </div>
             <div class="form-group">
                 <label>密码:</label>
@@ -95,10 +107,10 @@
     <!-- 注册模态框 -->
     <div id="registerModal" class="modal">
         <div class="modal-content">
-            <h3>ByUsi账户注册</h3>
+            <h3>用户注册</h3>
             <div class="form-group">
-                <label>ByUsi账户名:</label>
-                <input type="text" id="registerUsername" placeholder="输入ByUsi账户名">
+                <label>用户名:</label>
+                <input type="text" id="registerUsername" placeholder="输入用户名">
             </div>
             <div class="form-group">
                 <label>邮箱:</label>
@@ -174,7 +186,7 @@
         <div class="context-menu-item" data-action="new-file">新建文件</div>
         <div class="context-menu-item" data-action="new-folder">新建文件夹</div>
         <div class="context-menu-item" data-action="rename">重命名</div>
-        <div class="context-menu-item" data-action="delete" style="color: #e74c3c;">删除</div>
+        <div class="context-menu-item danger" data-action="delete">删除</div>
     </div>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
