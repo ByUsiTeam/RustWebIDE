@@ -1,4 +1,7 @@
 Flask
 Flask-CORS
+Flask-SocketIO
 requests
 Werkzeug
+eventlet
+python-socketio

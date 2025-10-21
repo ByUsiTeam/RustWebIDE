@@ -1,4 +1,58 @@
 let currentTerminalId = null;
+let socket = null;
+let isAuthenticated = false;
+let currentUser = null;
+
+// 初始化
+document.addEventListener('DOMContentLoaded', function() {
+    checkAuthStatus();
+    loadSavedCode();
+    initSocketIO();
+});
+
+// 检查认证状态
+async function checkAuthStatus() {
+    try {
+        const response = await fetch('/api/check_auth');
+        const result = await response.json();
+        
+        if (result.authenticated && result.user) {
+            isAuthenticated = true;
+            currentUser = result.user;
+            updateUserInfo(currentUser);
+            showMessage('自动登录成功!', 'success');
+        }
+    } catch (error) {
+        console.log('检查认证状态失败:', error);
+    }
+}
+
+// 初始化 WebSocket
+function initSocketIO() {
+    socket = io();
+    
+    socket.on('connected', function(data) {
+        console.log('WebSocket connected:', data);
+    });
+    
+    socket.on('terminal_output', function(data) {
+        const terminalOutput = document.getElementById('terminal-output');
+        if (terminalOutput) {
+            terminalOutput.innerHTML += data.output;
+            terminalOutput.scrollTop = terminalOutput.scrollHeight;
+        }
+    });
+    
+    socket.on('terminal_started', function(data) {
+        currentTerminalId = data.terminal_id;
+        console.log('Terminal started:', currentTerminalId);
+    });
+    
+    socket.on('disconnect', function() {
+        console.log('WebSocket disconnected');
+        showMessage('连接断开，正在重连...', 'info');
+    });
+}
 
 // 显示/隐藏模态框
 function showLogin() {
@@ -25,10 +79,20 @@ function switchTab(tabName) {
     } else {
         document.getElementById('output-content').style.display = 'none';
         document.getElementById('terminal-content').style.display = 'flex';
-        if (!currentTerminalId) {
-            startTerminal();
+        if (isAuthenticated && !currentTerminalId) {
+            startWebSocketTerminal();
         }
     }
+}
+
+// 启动 WebSocket 终端
+function startWebSocketTerminal() {
+    if (!socket || !isAuthenticated) {
+        showMessage('请先登录以使用终端', 'error');
+        return;
+    }
+    
+    socket.emit('start_terminal');
 }
 
 // 用户认证
@@ -54,8 +118,16 @@ async function login() {
         
         if (result.status === 'success') {
             hideModals();
-            updateUserInfo(result.data);
+            isAuthenticated = true;
+            currentUser = result.data;
+            updateUserInfo(currentUser);
             showMessage('登录成功!', 'success');
+            
+            // 重新初始化 WebSocket 连接
+            if (socket) {
+                socket.disconnect();
+            }
+            initSocketIO();
         } else {
             showMessage('登录失败: ' + result.message, 'error');
         }
@@ -99,8 +171,16 @@ async function register() {
 
 function logout() {
     fetch('/api/logout', { method: 'POST' });
+    isAuthenticated = false;
+    currentUser = null;
+    currentTerminalId = null;
     document.getElementById('userInfo').style.display = 'none';
     document.getElementById('authButtons').style.display = 'flex';
+    
+    if (socket) {
+        socket.disconnect();
+    }
+    
     showMessage('已退出登录', 'info');
 }
 
@@ -112,6 +192,11 @@ function updateUserInfo(userData) {
 
 // 代码运行
 async function runCode() {
+    if (!isAuthenticated) {
+        showMessage('请先登录以运行代码', 'error');
+        return;
+    }
+    
     const code = document.getElementById('editor').value;
     
     if (!code.trim()) {
@@ -156,59 +241,32 @@ function saveCode() {
     showMessage('代码已保存到本地', 'success');
 }
 
-// 终端功能
-async function startTerminal() {
-    try {
-        const response = await fetch('/api/terminal/start', {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        if (result.status === 'success') {
-            currentTerminalId = result.terminal_id;
-            document.getElementById('terminal-output').innerHTML = '终端已启动<br>> ';
-        } else {
-            showMessage('终端启动失败: ' + result.message, 'error');
-        }
-    } catch (error) {
-        showMessage('终端启动错误: ' + error.message, 'error');
+function loadSavedCode() {
+    const savedCode = localStorage.getItem('rust_code');
+    if (savedCode) {
+        document.getElementById('editor').value = savedCode;
     }
 }
 
-async function sendTerminalCommand() {
+// WebSocket 终端功能
+function sendTerminalCommand() {
+    if (!isAuthenticated) {
+        showMessage('请先登录以使用终端', 'error');
+        return;
+    }
+    
     const input = document.getElementById('terminal-input');
     const command = input.value.trim();
     
     if (!command) return;
     
-    if (!currentTerminalId) {
-        await startTerminal();
+    if (!socket || !socket.connected) {
+        showMessage('终端连接未建立', 'error');
+        return;
     }
     
-    try {
-        const response = await fetch('/api/terminal/execute', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ command })
-        });
-        
-        const result = await response.json();
-        const terminalOutput = document.getElementById('terminal-output');
-        
-        terminalOutput.innerHTML += command + '<br>';
-        if (result.status === 'success') {
-            terminalOutput.innerHTML += result.output + '<br>> ';
-        } else {
-            terminalOutput.innerHTML += '错误: ' + result.message + '<br>> ';
-        }
-        
-        input.value = '';
-        terminalOutput.scrollTop = terminalOutput.scrollHeight;
-    } catch (error) {
-        showMessage('终端命令执行错误: ' + error.message, 'error');
-    }
+    socket.emit('terminal_input', { input: command });
+    input.value = '';
 }
 
 function handleTerminalInput(event) {
@@ -236,17 +294,30 @@ function showMessage(message, type) {
     }, 3000);
 }
 
-// 页面加载时恢复保存的代码
-window.addEventListener('load', () => {
-    const savedCode = localStorage.getItem('rust_code');
-    if (savedCode) {
-        document.getElementById('editor').value = savedCode;
-    }
-    
-    // 点击模态框外部关闭
-    document.addEventListener('click', (e) => {
-        if (e.target.classList.contains('modal')) {
-            hideModals();
+// 系统信息
+async function showSystemInfo() {
+    try {
+        const response = await fetch('/api/system_info');
+        const result = await response.json();
+        
+        if (result.status === 'success') {
+            const info = result.data;
+            const infoText = `系统信息:
+Proot 可用: ${info.proot_available ? '是' : '否'}
+环境数量: ${info.environments_count}
+用户数量: ${info.users_count}
+终端可用: ${info.terminal_available ? '是' : '否'}`;
+            
+            showMessage(infoText, 'info');
         }
-    });
+    } catch (error) {
+        showMessage('获取系统信息失败: ' + error.message, 'error');
+    }
+}
+
+// 点击模态框外部关闭
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal')) {
+        hideModals();
+    }
 });

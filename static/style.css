@@ -280,3 +280,73 @@ body {
         height: 500px;
     }
 }
+
+/* WebSocket 状态指示器 */
+.connection-status {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 5px;
+}
+
+.connection-status.connected {
+    background-color: #2ecc71;
+}
+
+.connection-status.disconnected {
+    background-color: #e74c3c;
+}
+
+.connection-status.connecting {
+    background-color: #f39c12;
+}
+
+/* 终端改进样式 */
+.terminal-output {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+.terminal-input {
+    font-family: 'Courier New', monospace;
+}
+
+/* 系统信息按钮 */
+.btn-info {
+    background: #3498db;
+    color: white;
+}
+
+.btn-info:hover {
+    background: #2980b9;
+}
+
+/* 响应式改进 */
+@media (max-width: 768px) {
+    .terminal-content {
+        font-size: 11px;
+    }
+    
+    .btn {
+        padding: 5px 10px;
+        font-size: 0.8rem;
+    }
+}
+
+/* 加载动画 */
+.loading {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}

@@ -4,38 +4,43 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "编译 C++ 终端管理器..."
-
-# 针对 Termux 环境的编译选项
+echo "安装系统依赖..."
 if [ -d "/data/data/com.termux" ]; then
-    echo "检测到 Termux 环境，使用特定编译选项..."
-    # 在 Termux 中使用 clang++ 并链接必要的库
-    clang++ -std=c++17 -fPIC -shared -o libterminal.so terminal_manager.cpp \
-        -landroid-support \
-        -llog \
-        -lc++_shared
+    echo "检测到 Termux 环境"
+    pkg update && pkg install -y python clang make rust proot
 else
-    # Linux 环境使用 g++
-    gcc -std=c++17 -fPIC -shared -o libterminal.so terminal_manager.cpp -lutil
-fi
-
-if [ $? -ne 0 ]; then
-    echo "C++ 编译失败!"
-    exit 1
-fi
-
-echo "检查 Rust 环境..."
-if ! command -v rustc &> /dev/null; then
-    echo "安装 Rust..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source $HOME/.cargo/env
+    echo "检测到 Linux 环境"
+    # Ubuntu/Debian
+    if command -v apt &> /dev/null; then
+        sudo apt update && sudo apt install -y python3 python3-pip gcc build-essential proot
+    # CentOS/RHEL
+    elif command -v yum &> /dev/null; then
+        sudo yum install -y python3 python3-pip gcc-c++ make proot
+    fi
 fi
 
 echo "创建必要的目录..."
 mkdir -p workspace
+mkdir -p proot_environments
 mkdir -p logs
 
-chmod +x libterminal.so
+echo "初始化用户数据库..."
+if [ ! -f "user_db.json" ]; then
+    echo "{}" > user_db.json
+fi
+
+echo "安装 Python 依赖..."
+pip3 install -r requirements.txt
+
+if [ $? -ne 0 ]; then
+    echo "Python 依赖安装失败!"
+    exit 1
+fi
 
 echo "构建完成!"
 echo "启动服务: python3 app.py"
+echo "高级功能:"
+echo "  - Cookie 会话持久化"
+echo "  - Proot 环境隔离"
+echo "  - WebSocket 实时终端"
+echo "  - JSON 用户数据库"
