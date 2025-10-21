@@ -2,3 +2,4 @@
 /libterminal.so
 /workspace
 /logs
+*.bak
